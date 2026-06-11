@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA redirect — sem isso, qualquer refresh em URL não-raiz retorna 404
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
