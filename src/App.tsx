@@ -287,7 +287,56 @@ export default function App() {
 
   const handleDownloadPdf = (iframeEl?: HTMLIFrameElement | null) => {
     const target = iframeEl ?? iframeRef.current;
-    if (!target?.contentWindow) return;
+    if (!target?.contentWindow || !target.contentDocument) return;
+
+    // Inject compact print overrides to reduce whitespace between sections
+    const STYLE_ID = '__print_compact__';
+    if (!target.contentDocument.getElementById(STYLE_ID)) {
+      const style = target.contentDocument.createElement('style');
+      style.id = STYLE_ID;
+      style.textContent = `
+        @media print {
+          body { font-size: 10.5pt !important; line-height: 1.5 !important; }
+          .content-wrapper { padding: 5mm 10mm !important; }
+          .main-header { padding: 1rem 1.5rem !important; }
+          .main-header h1 { font-size: 1.8rem !important; }
+          .main-header h2 { font-size: 1.1rem !important; }
+          .main-header .description { margin-top: 0.5rem !important; }
+          .info-cards { gap: 0.5rem !important; margin-bottom: 1rem !important; }
+          .card {
+            padding: 0.75rem 1rem !important;
+            margin-bottom: 8px !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          /* Accordion items podem fluir entre páginas — remove o avoid que força espaço em branco */
+          .accordion-item {
+            break-inside: auto !important;
+            page-break-inside: auto !important;
+            margin-bottom: 0 !important;
+            border-bottom: 1px solid #e0e0e0 !important;
+          }
+          .accordion-content { padding: 0 0.5rem 0.75rem !important; }
+          .content-inner { padding: 0 0.5rem 0.5rem !important; }
+          .content-inner p, .content-inner ul { margin-bottom: 0.5rem !important; }
+          /* Mantém avoid só em blocos menores */
+          .highlight-box {
+            margin: 0.5rem 0 !important;
+            padding: 0.6rem 1rem !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .attachments-section {
+            margin-top: 0.75rem !important;
+            padding: 0.75rem 1rem !important;
+            break-inside: avoid !important;
+          }
+          .accordion-controls { display: none !important; }
+        }
+      `;
+      target.contentDocument.head.appendChild(style);
+    }
+
     target.contentWindow.focus();
     target.contentWindow.print();
   };
