@@ -29,8 +29,6 @@ import {
   type User,
   type SavedMemory,
 } from './services/firebaseService';
-// @ts-ignore
-import html2pdf from 'html2pdf.js';
 
 interface AttachedFile {
   id: string;
@@ -287,57 +285,11 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const handleDownloadPdf = async (iframeEl?: HTMLIFrameElement | null) => {
+  const handleDownloadPdf = (iframeEl?: HTMLIFrameElement | null) => {
     const target = iframeEl ?? iframeRef.current;
-    if (!target) return;
-
-    const doc = target.contentDocument;
-    if (!doc) return;
-
-    const originalContainer = doc.querySelector('.container') as HTMLElement;
-    if (!originalContainer) return;
-
-    originalContainer.style.outline = 'none';
-    originalContainer.contentEditable = 'false';
-
-    const accordionItems = doc.querySelectorAll('.accordion-item');
-    accordionItems.forEach((item) => {
-      item.classList.add('active');
-      const content = item.querySelector('.accordion-content') as HTMLElement;
-      if (content) {
-        content.style.maxHeight = 'none';
-        content.style.display = 'block';
-        content.style.opacity = '1';
-        content.style.visibility = 'visible';
-      }
-    });
-
-    const opt = {
-      margin: [10, 0] as [number, number],
-      filename: `memoria_reuniao_${new Date().toISOString().split('T')[0]}.pdf`,
-      image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#f1f5f9',
-        windowWidth: 1200,
-      },
-      jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const },
-      pagebreak: { mode: ['css', 'legacy'] },
-    };
-
-    try {
-      await html2pdf().set(opt).from(doc.documentElement).save();
-    } catch (err) {
-      console.error('PDF Error:', err);
-      setError('Erro ao gerar o PDF. Tente baixar o HTML ou copiar o conteúdo.');
-    } finally {
-      if (viewMode === 'edit' && target === iframeRef.current) {
-        originalContainer.style.outline = '2px dashed #6366f1';
-        originalContainer.contentEditable = 'true';
-      }
-    }
+    if (!target?.contentWindow) return;
+    target.contentWindow.focus();
+    target.contentWindow.print();
   };
 
   const handleCopyClipboard = () => {
