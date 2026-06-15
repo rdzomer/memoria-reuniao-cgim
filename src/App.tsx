@@ -17,6 +17,8 @@ import {
   FileDown,
   History,
   Clock,
+  ArrowLeft,
+  Pencil,
 } from 'lucide-react';
 import { generateMeetingMinutes, FilePart } from './services/geminiService';
 import {
@@ -37,7 +39,7 @@ interface AttachedFile {
   base64: string;
 }
 
-type AppTab = 'editor' | 'history';
+type AppTab = 'editor' | 'history' | 'viewer';
 
 function formatDate(date: Date): string {
   return date.toLocaleDateString('pt-BR', {
@@ -65,7 +67,11 @@ export default function App() {
   const [memoriesLoading, setMemoriesLoading] = useState(false);
   const [savedNotification, setSavedNotification] = useState(false);
 
+  // Viewer state
+  const [viewerMemory, setViewerMemory] = useState<SavedMemory | null>(null);
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const viewerIframeRef = useRef<HTMLIFrameElement>(null);
   const lastHtmlRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const multiFileInputRef = useRef<HTMLInputElement>(null);
@@ -75,16 +81,17 @@ export default function App() {
     return cleanup;
   }, []);
 
-  const syncFromIframe = () => {
-    if (iframeRef.current && viewMode === 'edit') {
-      const doc = iframeRef.current.contentDocument;
+  // Write memory to viewer iframe when viewer opens
+  useEffect(() => {
+    if (activeTab === 'viewer' && viewerMemory && viewerIframeRef.current) {
+      const doc = viewerIframeRef.current.contentDocument;
       if (doc) {
-        const newHtml = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
-        lastHtmlRef.current = newHtml;
-        setGeneratedHtml(newHtml);
+        doc.open();
+        doc.write(viewerMemory.html);
+        doc.close();
       }
     }
-  };
+  }, [activeTab, viewerMemory]);
 
   useEffect(() => {
     if (generatedHtml && iframeRef.current) {
@@ -145,7 +152,6 @@ export default function App() {
       setGeneratedHtml(result);
       setViewMode('preview');
 
-      // Auto-save to Firestore
       if (currentUser) {
         try {
           await saveMemory(currentUser.uid, result, input);
@@ -157,7 +163,7 @@ export default function App() {
       }
     } catch (err: any) {
       console.error(err);
-      const errorMessage = err?.message || 'Erro deconhecido';
+      const errorMessage = err?.message || 'Erro desconhecido';
       setError(
         `Erro ao gerar a memória: ${errorMessage}. Verifique se sua chave da API está configurada nos segredos.`
       );
@@ -267,9 +273,9 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const handleDownload = () => {
-    if (!generatedHtml) return;
-    const content = lastHtmlRef.current || generatedHtml;
+  const handleDownload = (html?: string) => {
+    const content = html || lastHtmlRef.current || generatedHtml;
+    if (!content) return;
     const blob = new Blob([content], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -281,17 +287,15 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const handleDownloadPdf = async () => {
-    if (!iframeRef.current) return;
+  const handleDownloadPdf = async (iframeEl?: HTMLIFrameElement | null) => {
+    const target = iframeEl ?? iframeRef.current;
+    if (!target) return;
 
-    const doc = iframeRef.current.contentDocument;
+    const doc = target.contentDocument;
     if (!doc) return;
 
     const originalContainer = doc.querySelector('.container') as HTMLElement;
     if (!originalContainer) return;
-
-    const originalOutline = originalContainer.style.outline;
-    const originalEditable = originalContainer.contentEditable;
 
     originalContainer.style.outline = 'none';
     originalContainer.contentEditable = 'false';
@@ -329,7 +333,7 @@ export default function App() {
       console.error('PDF Error:', err);
       setError('Erro ao gerar o PDF. Tente baixar o HTML ou copiar o conteúdo.');
     } finally {
-      if (viewMode === 'edit') {
+      if (viewMode === 'edit' && target === iframeRef.current) {
         originalContainer.style.outline = '2px dashed #6366f1';
         originalContainer.contentEditable = 'true';
       }
@@ -358,13 +362,16 @@ export default function App() {
 
   const handleOpenTab = (tab: AppTab) => {
     setActiveTab(tab);
-    if (tab === 'history') {
-      loadMemories();
-    }
+    if (tab === 'history') loadMemories();
   };
 
   const handleOpenMemory = (memory: SavedMemory) => {
-    lastHtmlRef.current = null; // force iframe rewrite on next render
+    setViewerMemory(memory);
+    setActiveTab('viewer');
+  };
+
+  const handleEditMemory = (memory: SavedMemory) => {
+    lastHtmlRef.current = null;
     setGeneratedHtml(memory.html);
     setViewMode('preview');
     setActiveTab('editor');
@@ -375,6 +382,10 @@ export default function App() {
     try {
       await deleteMemory(currentUser.uid, memory.id);
       setMemories((prev) => prev.filter((m) => m.id !== memory.id));
+      if (viewerMemory?.id === memory.id) {
+        setViewerMemory(null);
+        setActiveTab('history');
+      }
     } catch (e) {
       console.error('[History] Failed to delete memory:', e);
     }
@@ -421,14 +432,14 @@ Tópicos:
             <button
               onClick={() => handleOpenTab('history')}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                activeTab === 'history'
+                activeTab === 'history' || activeTab === 'viewer'
                   ? 'bg-indigo-600 text-white'
                   : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
               }`}
             >
               <History className="w-4 h-4" />
               Histórico
-              {memories.length > 0 && activeTab !== 'history' && (
+              {memories.length > 0 && activeTab === 'editor' && (
                 <span className="ml-1 bg-indigo-100 text-indigo-700 text-xs px-1.5 py-0.5 rounded-full font-bold">
                   {memories.length}
                 </span>
@@ -440,6 +451,81 @@ Tópicos:
 
       <main className="max-w-7xl mx-auto px-4 py-8">
         <AnimatePresence>
+          {/* ── VIEWER TAB ── */}
+          {activeTab === 'viewer' && viewerMemory && (
+            <motion.div
+              key="viewer"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.2 }}
+              className="flex flex-col gap-4"
+            >
+              {/* Viewer toolbar */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => handleOpenTab('history')}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    Histórico
+                  </button>
+                  <div>
+                    <h2 className="font-semibold text-slate-800 text-base leading-tight">
+                      {viewerMemory.title}
+                    </h2>
+                    <div className="flex items-center gap-1 text-xs text-slate-400 mt-0.5">
+                      <Clock className="w-3 h-3" />
+                      {formatDate(viewerMemory.createdAt)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleEditMemory(viewerMemory)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => handleDownloadPdf(viewerIframeRef.current)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
+                  >
+                    <FileDown className="w-3.5 h-3.5" />
+                    PDF
+                  </button>
+                  <button
+                    onClick={() => handleDownload(viewerMemory.html)}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-lg"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    HTML
+                  </button>
+                  <button
+                    onClick={() => handleDeleteMemory(viewerMemory)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors shadow-sm"
+                    title="Excluir memória"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Full-width viewer iframe */}
+              <div className="w-full rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden"
+                   style={{ height: 'calc(100vh - 200px)', minHeight: '500px' }}>
+                <iframe
+                  ref={viewerIframeRef}
+                  className="w-full h-full border-none"
+                  title="Memory Viewer"
+                />
+              </div>
+            </motion.div>
+          )}
+
           {/* ── HISTORY TAB ── */}
           {activeTab === 'history' && (
             <motion.div
@@ -574,7 +660,6 @@ Tópicos:
                 </div>
 
                 <div className="flex flex-col gap-3">
-                  {/* File Drop/Upload Area */}
                   <div className="flex flex-col gap-2">
                     <input
                       type="file"
@@ -598,7 +683,6 @@ Tópicos:
                     </button>
                   </div>
 
-                  {/* Attached Files List */}
                   <AnimatePresence>
                     {attachedFiles.length > 0 && (
                       <div className="flex flex-wrap gap-2">
@@ -626,7 +710,6 @@ Tópicos:
                     )}
                   </AnimatePresence>
 
-                  {/* Text Input */}
                   <div className="relative group">
                     <textarea
                       value={input}
@@ -700,7 +783,6 @@ Tópicos:
                       </button>
                     </div>
 
-                    {/* Saved notification */}
                     <AnimatePresence>
                       {savedNotification && (
                         <motion.div
@@ -759,7 +841,7 @@ Tópicos:
                           {copySuccess ? 'Copiado!' : 'Copiar'}
                         </button>
                         <button
-                          onClick={handleDownloadPdf}
+                          onClick={() => handleDownloadPdf()}
                           className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
                           title="Baixar em PDF"
                         >
@@ -767,7 +849,7 @@ Tópicos:
                           PDF
                         </button>
                         <button
-                          onClick={handleDownload}
+                          onClick={() => handleDownload()}
                           className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-lg"
                           title="Baixar em HTML"
                         >
