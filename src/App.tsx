@@ -364,8 +364,8 @@ export default function App() {
   };
 
   const handleOpenMemory = (memory: SavedMemory) => {
+    lastHtmlRef.current = null; // force iframe rewrite on next render
     setGeneratedHtml(memory.html);
-    lastHtmlRef.current = memory.html;
     setViewMode('preview');
     setActiveTab('editor');
   };
@@ -439,7 +439,7 @@ Tópicos:
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-        <AnimatePresence mode="wait">
+        <AnimatePresence>
           {/* ── HISTORY TAB ── */}
           {activeTab === 'history' && (
             <motion.div
